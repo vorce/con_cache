@@ -1,5 +1,6 @@
 defmodule ConCacheTest do
   use ExUnit.Case, async: false
+  use ExUnitProperties
 
   test "initial" do
     {:ok, cache} = start_cache()
@@ -55,6 +56,16 @@ defmodule ConCacheTest do
     assert ConCache.get(cache, :a) == 1
   end
 
+  property "able to get after put" do
+    {:ok, cache} = start_cache()
+    check all key <- primitive_generator(),
+              value <- data_generator() do
+
+      assert ConCache.put(cache, key, value) == :ok
+      assert ConCache.get(cache, key) == value
+    end
+  end
+
   test "multiple put on bag" do
     {:ok, cache} = start_cache(ets_options: [:bag])
     ConCache.put(cache, :a, 1)
@@ -67,6 +78,20 @@ defmodule ConCacheTest do
     ConCache.put(cache, :a, 1)
     ConCache.put(cache, :a, 1)
     assert ConCache.get(cache, :a) == [1, 1]
+  end
+
+  property "duplicate_bag contains the same number of items as put calls" do
+    {:ok, cache} = start_cache(ets_options: [:duplicate_bag])
+    check all key <- primitive_generator(),
+              calls <- StreamData.integer(0..1_000) do
+
+      ConCache.delete(cache, key)
+      Enum.each(0..calls, fn val ->
+        ConCache.put(cache, key, val)
+      end)
+
+      assert cache |> ConCache.get(key) |> length() == calls + 1
+    end
   end
 
   test "insert_new" do
@@ -98,6 +123,17 @@ defmodule ConCacheTest do
     ConCache.put(cache, :a, 1)
     assert ConCache.delete(cache, :a) == :ok
     assert ConCache.get(cache, :a) == nil
+  end
+
+  property "value is nil after delete" do
+    {:ok, cache} = start_cache()
+    check all key <- primitive_generator(),
+              value <- data_generator() do
+
+      ConCache.put(cache, key, value)
+      assert ConCache.delete(cache, key) == :ok
+      assert ConCache.get(cache, key) == nil
+    end
   end
 
   test "delete on bag" do
@@ -416,5 +452,17 @@ defmodule ConCacheTest do
 
   defp start_cache(opts \\ []) do
     ConCache.start_link(Keyword.merge([ttl_check_interval: false], opts))
+  end
+
+  defp data_generator() do
+    gen all data <- StreamData.one_of([primitive_generator(), StreamData.list_of(primitive_generator()), StreamData.map_of(primitive_generator(), primitive_generator())]) do
+      data
+    end
+  end
+
+  defp primitive_generator() do
+    gen all primitive <- StreamData.one_of([StreamData.atom(:alphanumeric), StreamData.binary(), StreamData.integer()]) do
+      primitive
+    end
   end
 end
